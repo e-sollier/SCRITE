@@ -8,7 +8,7 @@ from SCRITE.trees import DFS, parentVector2ancMatrix, parent2children
 
 # Convert read counts to mutation probabilities
 
-def calculate_llr_mut(params, alt, ref,indices_LOH=[]):
+def calculate_llr_mut(params,ref,alt,indices_LOH=[]):
     """
     Args:
         params                  - dictionary of parameters (overdispersion_wt, overdispersion_mut, dropout, sequencing_error_rate)
@@ -93,8 +93,7 @@ def log_scoretree(llr_mut, parVec, marginalization):
     """
     Log score of the tree
     Args:
-        p_ref           - likelihood given that no mutation
-        p_mut           - likelihood given mutation
+        llr_mut         - log likelihood ratio of the data given that the cell has a mutation compared to not having the mutation (matrix)
         parVec          - parent vector of tree (list)
         marginalization - if true the attachment points are marginalized (bool)
         

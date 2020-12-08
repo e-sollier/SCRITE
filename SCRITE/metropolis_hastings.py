@@ -1,9 +1,9 @@
 # Functions for running the parameter and tree optimization using a metropolis-hastings algorithm
-
-import numpy as np
 import math
 import random
 from random import gauss
+import numpy as np
+import pandas as pd
 from SCRITE.trees import getRandParentVec, proposeNewTree, parentVector2ancMatrix
 from SCRITE.scores import calculate_llr_mut, log_scoretree, log_scoreparams, mutation_probabilities_tree
 
@@ -44,7 +44,7 @@ def sample_multivariate_normal(params,prior_params):
   
     
 
-def runMCMC(MCMC_params,params,prior_params,alt,ref,indices_LOH,seed=0):
+def runMCMC(MCMC_params,params,prior_params,df_ref,df_alt,seed=0):
     """
     Runs the Metropolis-Hastings algorithm.
     It samples from the posterior paramter distributions / optimizes the parameters and mutation tree
@@ -52,23 +52,24 @@ def runMCMC(MCMC_params,params,prior_params,alt,ref,indices_LOH,seed=0):
         MCMC params             - parameters for the MCMC: number of loops, number of reps etc...
         loops                   - number of loops within a MCMC (int)
         params                  - initial values for overdispersion_hom, overdispersion_het, dropout, prior_p_mutation (dict)
-        prior_params            - min, max, alpha and beta of prior parameter distributions (list)
-        alt                     - alternative read counts (list)
-        ref                     - wildtype/reference read counts (list)
-        indices_LOH:            - indices corresponding to LOH events
+        prior_params            - min, max, alpha and beta of prior parameter distributions 
+        df_ref                  - dataframe of reference read counts
+        df_alt                  - dataframe of alternative read counts
         
     Returns:
         sample                  - all samples after burn-in of current log-score, current tree log-score, current params and curent parent vector (list)
         bestTree                - Tree which achieved the highest score
         bestParams              - Paramameters which achieved the highest score
         bestScore               - Highest score obtained among all samples
-        posterior_mutation_probabilities
+        df_mut_prob             - Posterior mutation probabilities
     """
     np.random.seed(seed)
-    num_mut,num_cells = np.shape(ref)
-    optStatesAfterBurnIn = 0
+    ref=np.array(df_ref)
+    alt=np.array(df_alt)
+    bool_LOH = [name[:3]=="LOH" for name in df_ref.index]
+    indices_LOH = np.where(bool_LOH)[0] 
+    
     burnIn = MCMC_params["loops"] * MCMC_params["burnInPhase"]
-    parentVectorSize = num_mut
     eps = 0.00000000001
     bestTree= []
     sample = []
@@ -78,10 +79,10 @@ def runMCMC(MCMC_params,params,prior_params,alt,ref,indices_LOH,seed=0):
     
     for r in range(MCMC_params["reps"]):       # starts over, but keeps sampling, bestScore, bestTreeLogScore
 
-        currTreeParentVec = getRandParentVec(parentVectorSize)     # start MCMC with random tree
+        currTreeParentVec = getRandParentVec(ref.shape[0])     # start MCMC with random tree
         currTreeAncMatrix =  parentVector2ancMatrix(currTreeParentVec)
         currParams = params
-        llr_mut = calculate_llr_mut(params, alt, ref,indices_LOH)
+        llr_mut = calculate_llr_mut(params,ref,alt,indices_LOH)
         curr_llr_mut = llr_mut
         currTreeLogScore = log_scoretree(llr_mut, currTreeParentVec, MCMC_params["marginalization"])
         currParamsLogScore = log_scoreparams(currParams, prior_params)
@@ -114,7 +115,7 @@ def runMCMC(MCMC_params,params,prior_params,alt,ref,indices_LOH,seed=0):
                 if out_of_range:
                     continue
                 propParamsLogScore = log_scoreparams(propParams, prior_params)
-                llr_mut = calculate_llr_mut(propParams, alt, ref,indices_LOH)
+                llr_mut = calculate_llr_mut(propParams, ref,alt,indices_LOH)
                 propTreeLogScore = log_scoretree(llr_mut, currTreeParentVec, MCMC_params["marginalization"])
                 propScore = propTreeLogScore + propParamsLogScore
 
@@ -153,9 +154,7 @@ def runMCMC(MCMC_params,params,prior_params,alt,ref,indices_LOH,seed=0):
     noStepsAfterBurnin = MCMC_params["reps"] * (MCMC_params["loops"] - burnIn)
 
     print( "best log score for tree: " , bestTreeLogScore)
-    print( "optimal steps after burn-in: " , optStatesAfterBurnIn)
     print( "total #steps after burn-in: ", noStepsAfterBurnin)
-    print( "percentage of optimal steps after burn-in: " , optStatesAfterBurnIn / noStepsAfterBurnin)
     print( "percentage of new Parameters accepted:", (moveAcceptedParams / (totalMovesParams+1)) * 100, "%")
     print( "percentage of Tree moves accepted:", (moveAcceptedTrees / totalMovesTrees) * 100, "%")
     
@@ -165,5 +164,5 @@ def runMCMC(MCMC_params,params,prior_params,alt,ref,indices_LOH,seed=0):
         print( "best value for  dropout: " , bestParams["dropout"])
         print( "best value for  sequencing_error_rate: " , bestParams["sequencing_error_rate"])
         print( "best log score for (Tree, Params): " , bestScore)
-    posterior_mutation_probabilities = np.mean(mutation_probabilities_sample,axis=0)
-    return sample, bestTree, bestParams, bestScore, posterior_mutation_probabilities
+    df_mut_prob = pd.DataFrame(np.mean(mutation_probabilities_sample,axis=0),index = df_ref.index,columns = df_ref.columns)
+    return sample, bestTree, bestParams, bestScore, df_mut_prob

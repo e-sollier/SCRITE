@@ -10,16 +10,16 @@ from SCRITE.trees import parentVector2ancMatrix, DFS, parent2children
 
 
 
-def get_likelihood_attachments(parVec,params,alt,ref,indices_LOH):
+def get_likelihood_attachments(parVec,params,ref,alt,indices_LOH):
     """
     Given a mutation tree, compute the likelihoods of the attachments of the cells to the mutations.
     Args:
         parVec: mutation tree given as a list of parents
         params                  - overdispersion_wt, overdispersion_mut, dropout, sequencing_error_rate (dict)
+        ref                     - reference read counts (list)
         alt                     - alternative read counts (list)
-        ref                     - wildtype/reference read counts (list)
     """
-    llr_mut = calculate_llr_mut(params, alt, ref,indices_LOH=indices_LOH)
+    llr_mut = calculate_llr_mut(params, ref,alt,indices_LOH=indices_LOH)
 
     # Compute the attachment probabilities by doing a depth first traversal of the mutation tree
     scores = log_likelihood_attachments(parVec,llr_mut)
@@ -27,34 +27,35 @@ def get_likelihood_attachments(parVec,params,alt,ref,indices_LOH):
     return scores
 
 
-def get_optimal_attachments(parVec, params, alt, ref,indices_LOH):
+def get_optimal_attachments(parVec, params,ref,alt,indices_LOH):
     """
     Determines the optimal attachment points of the cells to the mutation tree
     Args:
         parVec                  - parent vector (list)
         params                  - overdispersion_wt, overdispersion_mut, dropout, sequencing_error_rate (dict)
+        ref                     - reference read counts (list)
         alt                     - alternative read counts (list)
-        ref                     - wildtype/reference read counts (list)
+        
         
     Returns:
         attachmentPoints        - optimal attachment points (list)
     """    
-    likelihood_attachments = get_likelihood_attachments(parVec,params,alt,ref,indices_LOH)
+    likelihood_attachments = get_likelihood_attachments(parVec,params,ref,alt,indices_LOH)
     optimal_attachments = np.argmax(likelihood_attachments,axis=0)
 
     return optimal_attachments
   
     
 
-def graphviz(parVec,params,gene_names,alt,ref,indices_LOH,includeCells=False):
+def graphviz(parVec,params,gene_names,ref,alt,indices_LOH,includeCells=False):
     """
     Create a graphviz file of the mutation tree
     Args:
         parVec                  - parent vector of tree (list)
         params                  - overdispersion_wt, overdispersion_mut, dropout, sequencing_error_rate (dict)
         gene_names              - The names of the mutation sites (list)
-        alt                     - Counts for the alt allele
         ref                     - Counts for the ref allele
+        alt                     - Counts for the alt allele
         indices_LOH             - Indices corresponding to LOH events
         includeCells            - if True, include the cells in the mutation tree
         
@@ -74,7 +75,7 @@ def graphviz(parVec,params,gene_names,alt,ref,indices_LOH,includeCells=False):
     if includeCells:
         gv += "node [color=lightgrey, style=filled, fontcolor=black];\n"
                                 
-        attachmentPoints = get_optimal_attachments(parVec, params, alt, ref,indices_LOH)
+        attachmentPoints = get_optimal_attachments(parVec, params, ref,alt,indices_LOH)
         
         for y, a in enumerate(attachmentPoints):
             gv += "\"" + gene_names[a] + "\"" + " -> s"  + str(y + 1) + ";\n"
@@ -84,13 +85,13 @@ def graphviz(parVec,params,gene_names,alt,ref,indices_LOH,includeCells=False):
 
 
 
-def getPosteriorMutationProbabilities(parVecSample, paramsSample, alt, ref,indices_LOH):
+def getPosteriorMutationProbabilities(parVecSample, paramsSample,ref,alt,indices_LOH):
     """
     Args:
         parVecSample            - Sample of parent vectors (list)
         paramsSample            - Sample of params: overdispersion_wt, overdispersion_mut, dropout, prior_p_mutation (dict)
+        ref                     - reference read counts (array)
         alt                     - alternative read counts (array)
-        ref                     - wildtype/reference read counts (array)
         
     Returns:
         attachmentPoints        - optimal attachment points (list)
@@ -103,7 +104,7 @@ def getPosteriorMutationProbabilities(parVecSample, paramsSample, alt, ref,indic
         parVec = parVecSample[sample_index]
         ancMatrix = parentVector2ancMatrix(parVec)
 
-        likelihood_attachments = get_likelihood_attachments(parVec,params,alt,ref,indices_LOH)
+        likelihood_attachments = get_likelihood_attachments(parVec,params,ref,alt,indices_LOH)
         denominators = np.sum(likelihood_attachments,axis=0)
         prob_mutations = np.zeros((num_mut,num_cells))
         for j in range(num_mut):
@@ -115,14 +116,14 @@ def getPosteriorMutationProbabilities(parVecSample, paramsSample, alt, ref,indic
     mutation_probabilities = mutation_probabilities / len(parVecSample)
     return mutation_probabilities
 
-def reorder_mutations_cells(parVec,params,alt,ref,indices_LOH):
+def reorder_mutations_cells(parVec,params,ref,alt,indices_LOH):
     """ 
     Reorder the mutations and the cells to reflect clustering induced by the mutation tree.
     The order of the mutations is defined by a Depth First traversal of the mutation tree,
     and the order of the cells is based on their best attachment in the mutation tree.
     """
     DFS_order = DFS(parVec)
-    attachments = get_optimal_attachments(parVec,params,alt,ref,indices_LOH)
+    attachments = get_optimal_attachments(parVec,params,ref,alt,indices_LOH)
     order_cells = []
     for mutation in DFS_order:
         #Find all cells attached to this mutation
@@ -163,10 +164,28 @@ def create_dendrogram_from_tree(parVec):
     Z[:,2] = Z[:,2] - np.min(Z[:,2])
     return Z
 
+def get_cells_annotations(metadata,cell_names):
+    if metadata is None:
+        return None
+    l = []
+    for x in cell_names:
+        if x in metadata.index:
+            if metadata.loc[x,"neoplastic"]=="Neoplastic":
+                l.append("red")
+            else:
+                l.append("blue")
+        else:
+            l.append("grey")
+    cells_annotations = pd.DataFrame({"Neoplasticity":np.array(l)},index = cell_names)
+    return cells_annotations
 
-def plot_mutation_probabilities(mutation_probabilities,tree,params,alt,ref,indices_LOH,cells_annotations=None,output_file=None):
+
+
+def plot_mutation_probabilities(mutation_probabilities,tree,params,df_ref,df_alt,cells_annotations=None,output_file=None):
     dendrogram = create_dendrogram_from_tree(tree)
-    order_mutations, order_cells = reorder_mutations_cells(tree,params,alt,ref,indices_LOH)
+    bool_LOH = [name[:3]=="LOH" for name in df_ref.index]
+    indices_LOH = np.where(bool_LOH)[0]
+    order_mutations, order_cells = reorder_mutations_cells(tree,params,np.array(df_ref),np.array(df_alt),indices_LOH)
     #reordered_p_mut = mutation_probabilities[order_mutations,:]
 
     cell_names = mutation_probabilities.columns

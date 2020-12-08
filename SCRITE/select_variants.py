@@ -30,7 +30,7 @@ def select_loci_LOH(df_ref,df_alt,SNPs=None,minPercentageCellsAllele=10):
     Select loci for which one allele might be lost in some cells.
     Args:
         df_ref: dataframe of the counts for the ref allele (mutations in rows and cells in columns)
-        df_alt: datafrale if the counts for the alt allele
+        df_alt: dataframe of the counts for the alt allele
         SNPs: set of positions corresponding to common SNPs (optional). If it is given, only these positions will be considered for LOH
         minPercentageCellsAllele: minimum percentage of the cells with at least one read at this position, for each allele
     Returns;
@@ -83,9 +83,11 @@ def select_loci_LOH(df_ref,df_alt,SNPs=None,minPercentageCellsAllele=10):
     df_alt_selected = df_alt_selected.loc[loci_selected_dist_filtered,:]
     if df_alt_selected.shape[0]>400:
         #if too many sites were selected, use stricter filtering criterions
-        return select_loci_LOH(df_ref,df_alt,SNPs=SNPs,minPercentageCellsAllele = minPercentageCellsAllele+4)
+        pos_selected = [x[4:] for x in loci_selected]
+        return select_loci_LOH(df_ref.loc[pos_selected,:],df_alt.loc[pos_selected,:],SNPs=SNPs,minPercentageCellsAllele = minPercentageCellsAllele+2)
     return df_ref_selected,df_alt_selected
 
+    
 def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=None,minPercentageCellsExpressed=8):
     """
     Select loci where there might be a LOH, when we already know which cells are 
@@ -93,10 +95,10 @@ def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=Non
     Args:
         df_ref: dataframe of the counts for the ref allele (mutations in rows and cells in columns)
         df_alt: datafrale if the counts for the alt allele
-        SNPs: list of positions corresponding to common SNPs (optional). If it is given, only these positions will be considered for LOH, 
-            and only the other positions will be considered for somatic mutations
         neoplastic_cells: cells identified as neoplastic, which might contain LOH events or somatic mutations
         regular_cells: cells identified as healthy (ie immune cells...) which should not contain LOH events nor somatic mutations
+        SNPs: list of positions corresponding to common SNPs (optional). If it is given, only these positions will be considered for LOH, 
+            and only the other positions will be considered for somatic mutations
         minPercentageCellsExpressed: minimum percentage of the cells with at least one read at this position
     Returns:
         df_ref_selected: dataframe of the counts for the ref allele, for the selected loci
@@ -141,15 +143,23 @@ def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=Non
                 if ref_noalt_neoplastic > 1.5 * alt_noref_neoplastic and ref_noalt_regular <= 2.5 * alt_noref_regular:
                     # Alt allele lost in neoplastic cells
                     if alt_regular / (nb_regular+1) >= 0.5*minPercentageCellsExpressed /100 and ref_neoplastic / (nb_neoplastic+1) >= 0.5*minPercentageCellsExpressed /100:
-                        ref_selected.append(ref)
-                        alt_selected.append(alt)
-                        loci_selected.append("LOH_"+locus)
+                        alt_expressed = np.where(alt>0)[0]
+                        ratio_ref_alt = np.mean(ref[alt_expressed] / alt[alt_expressed])
+                        # make sure that the alt allele is not consistently expressed less than the ref allele
+                        if ratio_ref_alt <= 2: 
+                            ref_selected.append(ref)
+                            alt_selected.append(alt)
+                            loci_selected.append("LOH_"+locus)
                 elif alt_noref_neoplastic > 1.5 * ref_noalt_neoplastic and alt_noref_regular <= 2.5 * ref_noalt_regular:
                     # Ref allele lost in neoplastic cells
                     if ref_regular / (nb_regular+1) >= 0.5*minPercentageCellsExpressed /100 and alt_neoplastic / (nb_neoplastic+1) >= 0.5*minPercentageCellsExpressed /100:
-                        ref_selected.append(alt)
-                        alt_selected.append(ref)
-                        loci_selected.append("LOH_"+locus)
+                        ref_expressed = np.where(ref>0)[0]
+                        ratio_alt_ref = np.mean(alt[ref_expressed] / ref[ref_expressed])
+                        # make sure that the ref allele is not consistently expressed less than the alt allele
+                        if ratio_alt_ref <= 2: 
+                            ref_selected.append(alt)
+                            alt_selected.append(ref)
+                            loci_selected.append("LOH_"+locus)
 
     df_ref_selected = pd.DataFrame(ref_selected, index = loci_selected, columns = df_ref.columns)
     df_alt_selected = pd.DataFrame(alt_selected, index = loci_selected, columns = df_alt.columns)
@@ -160,10 +170,9 @@ def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=Non
 
     if df_alt_selected.shape[0]>600:
         #if too many sites were selected, use stricter filtering criterions
-        return select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs,minPercentageCellsExpressed = minPercentageCellsExpressed+4)
+        pos_selected = [x[4:] for x in loci_selected]
+        return select_loci_classified(df_ref.loc[pos_selected,:],df_alt.loc[pos_selected,:],neoplastic_cells,regular_cells,SNPs,minPercentageCellsExpressed = minPercentageCellsExpressed+2)
     return df_ref_selected,df_alt_selected
-
-
 
 def identify_neoplastic_regular(df_mut_prob):
     """
@@ -178,36 +187,27 @@ def identify_neoplastic_regular(df_mut_prob):
     """
     number_events_per_cell = np.sum(df_mut_prob>0.7,axis=0)
     sorted_nb_events = sorted(list(number_events_per_cell))
-    # find large jump in mutation probabilities
+    sum_probs_per_cell = np.sum(df_mut_prob,axis=0)
+    sorted_sum_probs = sorted(list(sum_probs_per_cell))
+
     width = len(sorted_nb_events) //5
-    max_diff = -1
-    max_index = 0
-    for i in range(width,len(sorted_nb_events)-width):
-        diff = sorted_nb_events[i+width] - sorted_nb_events[i-width]
-        if diff>max_diff:
-            max_diff = diff
-            max_index = i
-    if max_index-2*width<0:
-        regular_threshold = sorted_nb_events[max_index]
-    else:
-        regular_threshold = sorted_nb_events[max_index-width]
-    regular_threshold = 0.7*regular_threshold + 0.3*sorted_nb_events[0]
+    low_nb_events = np.mean(sorted_nb_events[:width])
+    high_nb_events = np.mean(sorted_nb_events[-width:])
+    regular_threshold_nb_events = 0.7 * low_nb_events + 0.3 * (low_nb_events+high_nb_events)/2
+    neoplastic_threshold_nb_events = 0.1 * high_nb_events + 0.9*(low_nb_events+high_nb_events)/2
+
+    low_sum_probs = np.mean(sorted_sum_probs[:width])
+    high_sum_probs = np.mean(sorted_sum_probs[-width:])
+    regular_threshold_sum_probs = 0.8 * low_sum_probs + 0.2 * (low_sum_probs+high_sum_probs)/2
+    neoplastic_threshold_sum_probs = 0.1 * high_sum_probs + 0.9*(low_sum_probs+high_sum_probs)/2
     
-    if max_index+2*width>=len(sorted_nb_events):
-        neoplastic_threshold = sorted_nb_events[max_index]
-    else:
-        neoplastic_threshold = sorted_nb_events[max_index+width]
-    neoplastic_threshold = 0.7*neoplastic_threshold + 0.3*sorted_nb_events[-1]
-    regular_cells = np.where(number_events_per_cell <= regular_threshold)[0]
-    neoplastic_cells = np.where(number_events_per_cell >= neoplastic_threshold)[0]
+    regular_cells = np.where((number_events_per_cell <= regular_threshold_nb_events) & (sum_probs_per_cell<=regular_threshold_sum_probs))[0]
+    neoplastic_cells = np.where((number_events_per_cell >= neoplastic_threshold_nb_events) & (sum_probs_per_cell>=neoplastic_threshold_sum_probs))[0]
     regular_cells = np.array(df_mut_prob.columns[regular_cells])
     neoplastic_cells = np.array(df_mut_prob.columns[neoplastic_cells])
-    #plt.plot(sorted_nb_events)
-    #plt.vlines(max_index,ymin=0,ymax=100)
-    #plt.vlines(max_index-3*width,ymin=0,ymax=100)
-    #plt.vlines(max_index+3*width,ymin=0,ymax=100)
-    #plt.show()
+
     return neoplastic_cells,regular_cells
+
 
 
 
@@ -228,7 +228,7 @@ def select_events_present(df_mut_prob,tree):
     selected_events = []
     old_indices = []
     for i,event in enumerate(df_mut_prob.index):
-        event_exist_in_some_cells = (np.sum(df_mut_prob.loc[event,:]>0.7)>=5 ) or (np.sum(df_mut_prob.loc[event,:]>0.6)>20 )
+        event_exist_in_some_cells = (np.sum(df_mut_prob.loc[event,:]>0.7)>=4 ) or (np.sum(df_mut_prob.loc[event,:]>0.6)>15 )
         if event_exist_in_some_cells:
             selected_events.append(event)
             old_indices.append(i)
