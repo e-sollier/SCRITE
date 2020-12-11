@@ -22,25 +22,47 @@ Here are the tools that I used for the preprocessing. Note that this preprocessi
 
 ### Downloading from SRA
 
-For all of the datasets that I used,  the FASTQs were available at the Sequence ReadArchive (SRA). The [SRA toolkit](https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?view=toolkit_doc) has to be installed. Once  this  is  done,  FASTQs  can  be downloaded with the command `fastq-dump –split-files SRA_id`.  The option `--split-files` ensures that, for paired-end sequencing, both ends are separated into 2 files.  Otherwise, both ends would be concatenated in a single FASTQ file, as if there was no gap between them,  which will confuse the aligner.  For 10x data,  the FASTQ files have to be renamed to the format SampleName_S1_L001_ReadType_001.fastq (where ReadType is (I1), R1 or R2), so that cellranger can recognize them. The naming conventions used by cellranger are described [here](https://kb.10xgenomics.com/hc/en-us/articles/115003802691-How-do-I-prepare-Sequence-Read-Archive-SRA-data-from-NCBI-for-Cell-Ranger-). For smart-seq datasets, it is possible to download an accession list using the SRA run selector. Using the accession list, the script `run_downloadSRA.sh` can be used to download all the FASTQ files.
+For all of the datasets that I used,  the FASTQs were available at the Sequence ReadArchive (SRA). With the SRA toolkit, FASTQs  can  be downloaded with the command `fastq-dump –split-files SRA_id`.  The option `--split-files` ensures that, for paired-end sequencing, both ends are separated into 2 files.  Otherwise, both ends would be concatenated in a single FASTQ file, as if there was no gap between them,  which will confuse the aligner.  For 10x data,  the FASTQ files have to be renamed to the format SampleName_S1_L001_ReadType_001.fastq (where ReadType is (I1), R1 or R2), so that cellranger can recognize them. The naming conventions used by cellranger are described [here](https://kb.10xgenomics.com/hc/en-us/articles/115003802691-How-do-I-prepare-Sequence-Read-Archive-SRA-data-from-NCBI-for-Cell-Ranger-). For smart-seq datasets, it is possible to download an accession list using the SRA run selector. If you have a file `SRR_Acc_List.txt` inside a directory `dataset`, then you can run the command:
+
+`./download.sh dataset` 
+
+to download all of the files from the accession list. You might have to run the command a second time in case some files failed to be downloaded properly.
 
 
 ### Alignment
 
 For smart-seq data, we can directly align the FASTQ files with STAR. For 10x data, we have to use cellranger, which uses STAR under the hood but also assigns reads to cells.
 
-For smart-seq datasets, the script `run_star.sh` can be used to run star for all cells in parallel. It basically amounts to running in parallel the command `STAR --runThreadN 8 --genomeDir ../refdata-gex-GRCh38-2020-A/star_genome --sjdbGTFfile ../refdata-gex-GRCh38-2020-A/genes/genes.gtf --outSAMmultNmax 1 --outSAMtype BAM SortedByCoordinate --outFileNamePrefix alignments/${line} --readFilesIn fastq/${line}_1.fastq fastq/${line}_2.fastq`.
+For smart-seq datasets, you can run the command:
+
+`./run_star.sh dataset`
+
+to align all of the fastq files in parallel. You might have to adapt the path to your star index in the bash script.
 
 For 10x data, the command looks like: `cellranger count --id out_dir --fastqs fastq --sample SRR12603782 --transcriptome ../GRCh38 --chemistry threeprime` where `fastq` is the directory containing the renamed fastq files.
 
+### Merging the BAM files
+
+After the alignment, we get one BAM file per cell with smart-seq data, and one BAM file for all of the cells with 10x data, where in each line a tag indicates the corresponding cell barcode.  For smart-seq data, I merge all the BAM files into one, where I keep the cell information in a read group tag.  That way, both the smart-seq and 10x workflows converge, which make the subsequent analysis easier. This can be done by running the command:
+
+`./run_merge.sh dataset`
+
+It also splits the merged BAM file by chromosome, which enables some parallelization for the subsequent steps.
 
 ### Obtaining the count matrices
 
-After the alignment, we get one BAM file per cell with smart-seq data, and one BAM file for all of the cells with 10x data, where in each line a tag indicates the corresponding cell barcode.  For smart-seq data, I merge all the BAM files into one, where I keep the cell information in a read group tag.  That way, both the smart-seq and 10x workflows converge, which make the subsequent analysis easier.  This is done by running `samtools merge -r -b bam_list.txt` where `bam_list.txt` contains the list of the BAM files. In practice, I split the BAM file into several files (one per chromosome) to enable some parallelization. This is done with my script `run_merge.sh`.
+Then, I run Varscan on this merged BAM file to identify positions where there might be some variants in some cells.  I filter each locus based on the total coverage and number of alternative reads, but at this point, I am not strict with the filtering. I also use my script `filter_variants.py` to filter out variants which do not have any ref reads (homozygous alt), because VarScan does not allow this type of filter. 
 
-Then, I run Varscan on this merged BAM file to identify positions where there might be some variants in some cells.  I filter each locus based on the total coverage and number of alternative reads, but at this point, I am not strict with the filtering. I also use my script `filter_variants.py` to filter out variants which do not have any ref reads (homozygous alt), because VarScan does not allow this type of filter. This is done with the script script `run_varscan.sh`.
+Then, I use [cellSNP](https://github.com/single-cell-genetics/cellSNP) to get the counts of reference and alternative reads for each cell and each position that was identified by VarScan.
+
+This is done with the command:
+
+`./run_cellSNP.sh dataset`
+
+Finally, my script `read_cellSNP.py` selects the candidate variants. It can be run with:
+
+`bsub -R "rusage[mem=8000]" "python preprocessing/read_cellSNP.py -i dataset/cellSNP -o dataset/DATA --freq genome1K.phase3.SNP_AF5e4.chr1toX.hg38.vcf"`
+
+where genome1K.phase3.SNP_AF5e4.chr1toX.hg38.vcf was downloaded from https://sourceforge.net/projects/cellsnp/files/SNPlist/.
 
 
-Then, I use [cellSNP](https://github.com/single-cell-genetics/cellSNP) to get the counts of reference and alternative reads for each cell and each position that was identified by VarScan. This is done with my script `run_cellSNP.sh`.
-
-The output of cellSNP has to be uncompressed, and then it can be processed by my script `read_cellSNP.py`. It can be run with: `python preprocessing/read_cellSNP.py -i cellSNP_output/glioblastoma_BT_S2 -o Data/glioblastoma_BT_S2 --freq genome1K`. genome1K is a directory containing one VCF file per chromosome, with the frequency of the common SNPs in the population. It was created by downloading the file genome1K.phase3.SNP_AF5e4.chr1toX.hg38.vcf.gz from https://sourceforge.net/projects/cellsnp/files/SNPlist/ and then running my script `split_genome1K.py`. It can be run with: `python split_genome1K -i path/genome1K.phase3.SNP_AF5e4.chr1toX.hg38.vcf -o ../genome1K`.
