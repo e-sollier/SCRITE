@@ -6,7 +6,7 @@ import pandas as pd
 parser = argparse.ArgumentParser()
 parser.add_argument('-i', type=str,help='Input directory containing the outputs of cellSNP (uncompressed).')
 parser.add_argument('-o', type=str,help='Output directory.')
-parser.add_argument('--freq', type=str,default = "genome1K",help='Directory containing VCF files with the frequency of SNPs in the population.')
+parser.add_argument('--freq', type=str,help='VCF file with the frequency of SNPs in the population.')
 parser.add_argument('--minPer', type=float,default = 10.0,help='Minimum Percentage of cells expressing a locus, for this locus to be selected.')
 args = parser.parse_args()
 
@@ -20,11 +20,12 @@ def read_1K(file):
         return SNP_freq
     with open(file,"r") as SNP_file:
         for line in SNP_file:
-            linesplit = line.split("\t")
-            AFs = linesplit[7].split(";")[1][3:].split(",")
-            alts = linesplit[4].split(",")
-            for index_alt in range(len(alts)):
-                SNP_freq["chr"+linesplit[0] + "_" + linesplit[1] + "_" + alts[index_alt]] = float(AFs[index_alt])
+            if line[0]!="#":
+                linesplit = line.split("\t")
+                AFs = linesplit[7].split(";")[1][3:].split(",")
+                alts = linesplit[4].split(",")
+                for index_alt in range(len(alts)):
+                    SNP_freq["chr"+linesplit[0] + "_" + linesplit[1] + "_" + alts[index_alt]] = float(AFs[index_alt])
     return SNP_freq
 
 def keep_locus(ref,alt,oth,minPercentageCellsExpressed=10):
@@ -50,9 +51,13 @@ def keep_locus(ref,alt,oth,minPercentageCellsExpressed=10):
                     return True
     return False
 
+# Read 1K genome data
+if args.freq is not None:
+    SNP_freq = read_1K(args.freq)
+else:
+    SNP_freq = {}
 
 #Parse output of cellSNP
-
 REFs = []
 ALTs = []
 loci = []
@@ -67,10 +72,7 @@ for x in chromosomes_all:
 
 for filename in chromosomes: 
     print("Reading chromosome " + filename)
-    if args.freq is not None:
-        SNP_freq = read_1K(os.path.join(args.freq,filename+".vcf"))
-    else:
-        SNP_freq = {}
+    
 
     #Parse the output of cellSNP
     with open(os.path.join(args.i,filename),"r") as VCF: 
@@ -121,6 +123,8 @@ for filename in chromosomes:
 df_ref = pd.DataFrame(REFs,index=loci,columns=barcodes)
 df_alt =pd.DataFrame(ALTs,index=loci,columns=barcodes)
 
+if not os.path.exists(args.o):
+    os.makedirs(args.o)
 df_ref.to_csv(os.path.join(args.o,"ref.csv"))
 df_alt.to_csv(os.path.join(args.o,"alt.csv"))
 if args.freq is not None:
