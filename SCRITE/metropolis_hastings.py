@@ -8,10 +8,11 @@ from SCRITE.trees import getRandParentVec, proposeNewTree, parentVector2ancMatri
 from SCRITE.scores import calculate_llr_mut, log_scoretree, log_scoreparams, mutation_probabilities_tree
 
 
-# If the new score is better, the move is accepted
-# If it is worse, the probability of acceptance depends on how much worse it is
+
 def acceptance(x_logs, x_new_logs):
     """
+    If the new score is better, the move is accepted.
+    If it is worse, the probability of acceptance depends on how much worse it is.
     Args:
         x_logs      - previous log score (float)
         x_new_logs  - new log score (float)
@@ -27,9 +28,9 @@ def acceptance(x_logs, x_new_logs):
         return (accept < math.e**(x_new_logs - x_logs))
       
 
-# Used to draw samples from a multivariate normal distribution
 def sample_multivariate_normal(params,prior_params):
     """
+    Used to draw samples from a multivariate normal distribution
     Args:
         params    - previous parameters (dict)
         prior_params   - prior for the parameters

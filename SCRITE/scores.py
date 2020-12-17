@@ -1,19 +1,21 @@
-# Functions to convert read counts to mutation probabilities and to calculate the paramter and tree log-scores
-
 import math
 import numpy as np
 from scipy.special import loggamma
 from SCRITE.trees import DFS, parentVector2ancMatrix, parent2children
 
 
-# Convert read counts to mutation probabilities
 
 def calculate_llr_mut(params,ref,alt,indices_LOH=[]):
     """
+    For each cell and each somatic event, computes the log likelihood ratio between (before the event) and (after the event).
+    A beta-binomial model is used, with a probability of dropout to account for monoallelic expression.
+    For mutations, we go from homozygous to heterozygous after the event,
+    and for LOH, we go from heterozygous to homozygous.
     Args:
-        params                  - dictionary of parameters (overdispersion_wt, overdispersion_mut, dropout, sequencing_error_rate)
-        alt                     - alternative read counts (list)
-        ref                     - wildtype/reference read counts (list)
+        params                  - dictionary of parameters (overdispersion_hom, overdispersion_het, dropout, sequencing_error_rate)
+        alt                     - alternative read counts (np.array of dim num_mut*num_cells)
+        ref                     - wildtype/reference read counts (np.array of dim num_mut*num_cells)
+        indices_LOH             - indices of the LOH events (list)
         
     Returns:
         llr_mut                 - log likelihood ratio of the data given that the cell has a mutation compared to not having the mutation

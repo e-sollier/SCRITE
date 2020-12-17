@@ -182,21 +182,20 @@ def get_cells_annotations(metadata,cell_names):
 
 
 def plot_mutation_probabilities(mutation_probabilities,tree,params,df_ref,df_alt,cells_annotations=None,output_file=None):
+    """
+    Plot the mutation probabilities for each cell and each mutation, and reorder the cells and mutations based on the tree.
+    Also plot a dendrogram next to the heatmap to show the tree.
+    """
     dendrogram = create_dendrogram_from_tree(tree)
     bool_LOH = [name[:3]=="LOH" for name in df_ref.index]
     indices_LOH = np.where(bool_LOH)[0]
     order_mutations, order_cells = reorder_mutations_cells(tree,params,np.array(df_ref),np.array(df_alt),indices_LOH)
-    #reordered_p_mut = mutation_probabilities[order_mutations,:]
 
     cell_names = mutation_probabilities.columns
     cell_names = np.array(cell_names)[order_cells]
     mut_names = mutation_probabilities.index
-    reordered_p_mut = mutation_probabilities
-    reordered_p_mut = reordered_p_mut.loc[:,cell_names]
+    reordered_p_mut = mutation_probabilities.loc[:,cell_names]
 
-
-    #row_colors = ["yellow" if x[:3]=="LOH" else "green" for x in mut_names]
-    #row_colors = pd.DataFrame({"LOH/MUT":np.array(row_colors)},index = mut_names)
 
     if cells_annotations is not None:
         cells_annotations = cells_annotations.loc[cell_names,:]

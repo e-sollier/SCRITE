@@ -4,7 +4,8 @@ import pandas as pd
 def filter_min_distance(loci,df_ref,df_alt,min_dist=10000):
     """Only keep loci which are at least min_dist bases apart. This is used to make sure that there is at most one locus per gene,
     so that the allelic dropouts are independant.
-    When one locus has to be removed, remove the one with the lowest coverage."""
+    When one locus has to be removed, remove the one with the lowest coverage.
+    Ideally, it would be better to use gene boundaries instead of an arbitrary distance."""
     loci_kept = []
     last_locus_added = ("0",-10000)
     last_coverage=0
@@ -44,6 +45,7 @@ def select_loci_LOH(df_ref,df_alt,SNPs=None,minPercentageCellsAllele=10):
 
     for locus in df_ref.index:
         if SNPs is None or locus in SNPs:
+            # only SNPs are considered for LOH
             chr,_ = locus.split("_")
             ref = df_ref.loc[locus,:]
             alt = df_alt.loc[locus,:]
@@ -92,6 +94,7 @@ def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=Non
     """
     Select loci where there might be a LOH, when we already know which cells are 
     neoplastic and which cells are healthy.
+    This classification can be inferred by first running the algorithm with only LOH events, or by classifying the cells based on gene expression.
     Args:
         df_ref: dataframe of the counts for the ref allele (mutations in rows and cells in columns)
         df_alt: datafrale if the counts for the alt allele
@@ -125,8 +128,8 @@ def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=Non
             alt_regular = np.sum(df_alt.loc[locus,regular_cells]>0)
 
             if (SNPs is None or not locus in SNPs) and \
-                ref_regular / nb_regular >= 0.7* minPercentageCellsExpressed / 100 and alt_regular < 0.03 * ref_regular and \
-                alt_neoplastic>max(5,0.10 * ref_neoplastic):
+                ref_regular / nb_regular >= minPercentageCellsExpressed / 100 and alt_regular < 0.03 * ref_regular and \
+                alt_neoplastic>max(7,0.10 * ref_neoplastic):
                 #Somatic mutation
                 #Ref allele is expressed in many regular cells, alt allele is not expressed in regular cells
                 #and alt allele is expressed at least 10% as much as the ref allele (to account for the fact that not all tumor cells may have the mutation)
@@ -140,7 +143,7 @@ def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=Non
                 alt_noref_neoplastic = np.sum((df_alt.loc[locus,neoplastic_cells]>4) & (df_ref.loc[locus,neoplastic_cells]==0))
                 ref_noalt_regular = np.sum((df_ref.loc[locus,regular_cells]>4) & (df_alt.loc[locus,regular_cells]==0))
                 ref_noalt_neoplastic = np.sum((df_ref.loc[locus,neoplastic_cells]>4) & (df_alt.loc[locus,neoplastic_cells]==0))
-                if ref_noalt_neoplastic > 1.5 * alt_noref_neoplastic and ref_noalt_regular <= 2.5 * alt_noref_regular:
+                if ref_noalt_neoplastic > 1.6 * alt_noref_neoplastic and ref_noalt_regular <= 2.0 * alt_noref_regular:
                     # Alt allele lost in neoplastic cells
                     if alt_regular / (nb_regular+1) >= 0.5*minPercentageCellsExpressed /100 and ref_neoplastic / (nb_neoplastic+1) >= 0.5*minPercentageCellsExpressed /100:
                         alt_expressed = np.where(alt>0)[0]
@@ -150,7 +153,7 @@ def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=Non
                             ref_selected.append(ref)
                             alt_selected.append(alt)
                             loci_selected.append("LOH_"+locus)
-                elif alt_noref_neoplastic > 1.5 * ref_noalt_neoplastic and alt_noref_regular <= 2.5 * ref_noalt_regular:
+                elif alt_noref_neoplastic > 1.6 * ref_noalt_neoplastic and alt_noref_regular <= 2.0 * ref_noalt_regular:
                     # Ref allele lost in neoplastic cells
                     if ref_regular / (nb_regular+1) >= 0.5*minPercentageCellsExpressed /100 and alt_neoplastic / (nb_neoplastic+1) >= 0.5*minPercentageCellsExpressed /100:
                         ref_expressed = np.where(ref>0)[0]
@@ -167,6 +170,17 @@ def select_loci_classified(df_ref,df_alt,neoplastic_cells,regular_cells,SNPs=Non
     loci_selected_dist_filtered = filter_min_distance(loci_selected,df_ref_selected,df_alt_selected,min_dist=10000)
     df_ref_selected = df_ref_selected.loc[loci_selected_dist_filtered,:]
     df_alt_selected = df_alt_selected.loc[loci_selected_dist_filtered,:]
+
+    count_LOH=0
+    count_MUT=0
+    for locus in loci_selected_dist_filtered:
+        if locus[:3]=="LOH":
+            count_LOH+=1
+        else:
+            count_MUT+=1
+    print(count_LOH)
+    print(count_MUT)
+    print("--")
 
     if df_alt_selected.shape[0]>600:
         #if too many sites were selected, use stricter filtering criterions
@@ -214,9 +228,11 @@ def identify_neoplastic_regular(df_mut_prob):
 def select_events_present(df_mut_prob,tree):
     """
     Select the events (mutations/LOH) which occured in some cells, and returned the tree which contains only those events.
+    This improves the visualization by removing irrelevant events.
     """
     def find_ancestor_in_list(parent,tree,list_selected):
         """
+        Find the first ancestor of a node which is in list_selected
         """
         if parent in list_selected:
             return parent

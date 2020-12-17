@@ -4,13 +4,15 @@
 # A cell attached to another part of the tree has the mutation it is attached to and all
 # mutations of its ancestors.
 
+# Trees are represented as parent vectors: parVec[i] is the index of the parent of the node indexed i.
+
 import numpy as np
 import random
 
 
-# Converts Prüfer code to parent vector
 def prüfer_to_parent(code):
     """
+    Converts Prüfer code to parent vector
     Args:
         code    - prüfer code (list)
         codelen - length of Prüfer code (int)
@@ -42,9 +44,9 @@ def prüfer_to_parent(code):
     return par_vec
 
                 
-# Creates a random parent vector -> This is used to start the tree optimization with a random tree
 def getRandParentVec(n,seed=None):
     """
+    Creates a random parent vector -> This is used to start the tree optimization with a random tree
     Arg:
         n - length of parent vector (int)
         
